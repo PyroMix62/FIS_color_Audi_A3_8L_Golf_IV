@@ -1,0 +1,1141 @@
+#include <Adafruit_GFX.h>    // include Adafruit graphics library
+#include <Adafruit_ST7735.h> // include Adafruit ST7735 display library
+#include <SPI.h>             // include Arduino SPI library
+#include <SD.h>              // include Arduino SD library
+ 
+#define TFT_BL   11   // Retro-eclairage écran
+#define TFT_CS     10   //CS
+#define TFT_RST   0   //RES             
+#define TFT_DC     2  //DC
+#define TFT_SCLK 13   // SCL
+#define TFT_MOSI 12   // SDA
+
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+ 
+#define int_conso 4 // signal conso
+#define int_moteur 5 // regime moteur
+#define int_tachy 6 // tachymètre
+#define int_fuel A6 // niveau fuel
+#define int_12V 7 // Contact +12V  A1,A2,0,1,4,5,6,7,8,9
+#define int_Menu_UP 8 // Menu Up
+#define int_Menu_Down 9 // Menu Down
+#define int_Menu_Reset A1 // remise à zero 
+
+
+
+const int freq_affichage = 1000;
+const byte nb_val_fuel = 200;
+const int Delta_Fuel =150; 
+const float convertion_vitesse = 0.96;  // Vitesse étalonnée par rapport au gps
+const float convertion_consommation = 13.4452300376051;
+const float convertion_niveau_jauge_a = 0.103442710734775;   // litre reservoir = a * niveau_fuel + b
+const float convertion_niveau_jauge_b = -34.688074045344;
+
+const int larg_cara = 8;
+
+const int chgt_page_time_delay = 200;
+const int reset_time_delay = 2000;
+
+uint8_t page = 1, page_max = 3, u_prev=0,d_prev=0,c_prev=0;
+unsigned long cpt_conso_inst= 0, conso_inst =0;   
+
+unsigned long cpt_conso1=0,cpt_moteur1=0,cpt_tachy1=0,cpt_conso2=0,cpt_tachy2=0,cpt_conso3=0,cpt_tachy3=0,timer =0 , reset_time=0;
+unsigned long tachy_inst=0,moteur_inst=0, chgt_time_Menu_Up = 0, chgt_time_Menu_Down = 0, chgt_time_Menu_Reset = 0;
+bool chgt_page = false, reset= false, press_menu_up =false , press_menu_down =false, press_menu_reset =false;
+   
+unsigned long cpt_conso=0,cpt_tachy=0,cpt_moteur=0,tps_affiche=0;
+int niveau_fuel = 0, niveau_fuel_prec =0;
+char ligne[16];
+char ligne2[100]; 
+int Calcul_fuel[300];
+byte index_fuel = 0, rapport_engage = 0;
+
+int Aff1_distance_parcourue = 999, Aff1_rapport = 999;
+float Aff1_conso_moy = 999, Aff1_conso_inst = 999, Aff1_distance_rest = 999 , distance_rest = 0;
+
+File config_file, record_file;
+
+const unsigned char myBitmap_pompe1 [] PROGMEM = {
+// 'pompe1', 17x11px
+0x03, 0xf2, 0x00, 0x82, 0x13, 0x00, 0xc2, 0x11, 0x00, 0xe2, 0x11, 0x80, 0xf3, 0xf9, 0x00, 0xfb, 
+0xf5, 0x00, 0xf3, 0xf4, 0x80, 0xe3, 0xf5, 0x00, 0xc3, 0xf6, 0x00, 0x83, 0xf0, 0x00, 0x07, 0xf8, 
+0x00
+};
+
+const unsigned char myBitmap_pompe2 [] PROGMEM = {
+// 'pompe2', 18x11px
+0x7e, 0x40, 0x00, 0x42, 0x64, 0x00, 0x42, 0x26, 0x00, 0x42, 0x37, 0x00, 0x7f, 0x27, 0x80, 0x7e, 
+0xa7, 0xc0, 0x7e, 0x97, 0x80, 0x7e, 0xa7, 0x00, 0x7e, 0xc6, 0x00, 0x7e, 0x04, 0x00, 0xff, 0x00, 
+0x00
+};
+
+const unsigned char myBitmap_moy [] PROGMEM = {
+// 'moy', 12x12px
+0x00, 0x10, 0x0f, 0x20, 0x10, 0xc0, 0x20, 0xc0, 0x41, 0x20, 0x42, 0x20, 0x44, 0x20, 0x48, 0x20, 
+0x30, 0x40, 0x30, 0x80, 0x4f, 0x00, 0x80, 0x00
+};
+
+const unsigned char myBitmap_0 [] PROGMEM = {
+// '0', 34x40px
+0x00, 0x1f, 0xfc, 0x00, 0x00, 0x00, 0x7f, 0xff, 0x00, 0x00, 0x00, 0xff, 0xff, 0x80, 0x00, 0x01, 
+0xff, 0xff, 0xc0, 0x00, 0x03, 0xff, 0xff, 0xe0, 0x00, 0x07, 0xff, 0xff, 0xf0, 0x00, 0x07, 0xfe, 
+0x3f, 0xf0, 0x00, 0x0f, 0xf8, 0x0f, 0xf8, 0x00, 0x0f, 0xf0, 0x07, 0xf8, 0x00, 0x0f, 0xf0, 0x07, 
+0xfc, 0x00, 0x1f, 0xf0, 0x03, 0xfc, 0x00, 0x1f, 0xe0, 0x03, 0xfc, 0x00, 0x1f, 0xe0, 0x03, 0xfc, 
+0x00, 0x1f, 0xe0, 0x03, 0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 
+0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 
+0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 
+0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x1f, 0xe0, 0x03, 
+0xfe, 0x00, 0x1f, 0xe0, 0x03, 0xfe, 0x00, 0x1f, 0xe0, 0x03, 0xfc, 0x00, 0x1f, 0xe0, 0x03, 0xfc, 
+0x00, 0x1f, 0xf0, 0x03, 0xfc, 0x00, 0x0f, 0xf0, 0x07, 0xfc, 0x00, 0x0f, 0xf8, 0x07, 0xf8, 0x00, 
+0x07, 0xf8, 0x0f, 0xf8, 0x00, 0x07, 0xfe, 0x3f, 0xf0, 0x00, 0x03, 0xff, 0xff, 0xf0, 0x00, 0x03, 
+0xff, 0xff, 0xe0, 0x00, 0x01, 0xff, 0xff, 0xc0, 0x00, 0x00, 0x7f, 0xff, 0x80, 0x00, 0x00, 0x3f, 
+0xfe, 0x00, 0x00, 0x00, 0x0f, 0xf8, 0x00, 0x00
+};
+
+const unsigned char myBitmap_1 [] PROGMEM = {
+// '1', 34x40px
+0x00, 0x00, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x00, 0x00, 0x00, 0x00, 0x7f, 0x00, 0x00, 0x00, 
+0x00, 0xff, 0x00, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00, 0x00, 0x03, 0xff, 0x00, 0x00, 0x00, 0x07, 
+0xff, 0x00, 0x00, 0x00, 0x0f, 0xff, 0x00, 0x00, 0x00, 0x3f, 0xff, 0x00, 0x00, 0x00, 0xff, 0xff, 
+0x00, 0x00, 0x03, 0xff, 0xff, 0x00, 0x00, 0x07, 0xff, 0xff, 0x00, 0x00, 0x0f, 0xfe, 0xff, 0x00, 
+0x00, 0x1f, 0xfc, 0xff, 0x00, 0x00, 0x1f, 0xf0, 0xff, 0x00, 0x00, 0x0f, 0xe0, 0xff, 0x00, 0x00, 
+0x07, 0x80, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 
+0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 
+0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 
+0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 
+0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 
+0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 
+0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 
+0xfe, 0x00, 0x00, 0x00, 0x00, 0x7c, 0x00, 0x00
+};
+
+const unsigned char myBitmap_2 [] PROGMEM = {
+// '2', 34x40px
+0x00, 0x0f, 0xfe, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xc0, 0x00, 0x00, 0xff, 0xff, 0xe0, 0x00, 0x01, 
+0xff, 0xff, 0xf0, 0x00, 0x03, 0xff, 0xff, 0xf8, 0x00, 0x07, 0xff, 0xff, 0xfc, 0x00, 0x07, 0xff, 
+0x1f, 0xfc, 0x00, 0x0f, 0xfc, 0x07, 0xfe, 0x00, 0x0f, 0xf0, 0x03, 0xfe, 0x00, 0x0f, 0xf0, 0x01, 
+0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xfe, 
+0x00, 0x0f, 0xc0, 0x01, 0xfe, 0x00, 0x07, 0x80, 0x03, 0xfe, 0x00, 0x00, 0x00, 0x03, 0xfe, 0x00, 
+0x00, 0x00, 0x07, 0xfc, 0x00, 0x00, 0x00, 0x0f, 0xfc, 0x00, 0x00, 0x00, 0x1f, 0xf8, 0x00, 0x00, 
+0x00, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x7f, 0xe0, 0x00, 0x00, 0x01, 0xff, 0xc0, 0x00, 0x00, 0x03, 
+0xff, 0x80, 0x00, 0x00, 0x07, 0xff, 0x00, 0x00, 0x00, 0x0f, 0xfe, 0x00, 0x00, 0x00, 0x1f, 0xfc, 
+0x00, 0x00, 0x00, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x7f, 0xe0, 0x00, 0x00, 0x00, 0xff, 0xc0, 0x00, 
+0x00, 0x01, 0xff, 0x80, 0x00, 0x00, 0x03, 0xff, 0x00, 0x00, 0x00, 0x07, 0xfe, 0x00, 0x00, 0x00, 
+0x0f, 0xfc, 0x00, 0x00, 0x00, 0x0f, 0xff, 0xff, 0xfe, 0x00, 0x1f, 0xff, 0xff, 0xff, 0x00, 0x1f, 
+0xff, 0xff, 0xff, 0x00, 0x1f, 0xff, 0xff, 0xff, 0x00, 0x1f, 0xff, 0xff, 0xff, 0x00, 0x0f, 0xff, 
+0xff, 0xff, 0x00, 0x07, 0xff, 0xff, 0xfe, 0x00  
+};
+
+const unsigned char myBitmap_3 [] PROGMEM = {
+// '3', 34x40px
+0x00, 0x1f, 0xfc, 0x00, 0x00, 0x00, 0x7f, 0xff, 0x00, 0x00, 0x01, 0xff, 0xff, 0x80, 0x00, 0x03, 
+0xff, 0xff, 0xe0, 0x00, 0x07, 0xff, 0xff, 0xe0, 0x00, 0x0f, 0xfc, 0x7f, 0xf0, 0x00, 0x0f, 0xf0, 
+0x1f, 0xf0, 0x00, 0x1f, 0xe0, 0x0f, 0xf8, 0x00, 0x1f, 0xe0, 0x07, 0xf8, 0x00, 0x1f, 0xc0, 0x07, 
+0xf8, 0x00, 0x0f, 0xc0, 0x07, 0xf8, 0x00, 0x0f, 0x80, 0x07, 0xf8, 0x00, 0x07, 0x00, 0x0f, 0xf8, 
+0x00, 0x00, 0x00, 0x0f, 0xf0, 0x00, 0x00, 0x00, 0x1f, 0xf0, 0x00, 0x00, 0x00, 0xff, 0xe0, 0x00, 
+0x00, 0x1f, 0xff, 0xc0, 0x00, 0x00, 0x3f, 0xff, 0xc0, 0x00, 0x00, 0x3f, 0xff, 0x80, 0x00, 0x00, 
+0x3f, 0xff, 0xc0, 0x00, 0x00, 0x3f, 0xff, 0xf0, 0x00, 0x00, 0x3f, 0xff, 0xf8, 0x00, 0x00, 0x0e, 
+0x3f, 0xf8, 0x00, 0x00, 0x00, 0x07, 0xfc, 0x00, 0x00, 0x00, 0x03, 0xfc, 0x00, 0x00, 0x00, 0x03, 
+0xfe, 0x00, 0x00, 0x00, 0x03, 0xfe, 0x00, 0x1f, 0x80, 0x01, 0xfe, 0x00, 0x3f, 0x80, 0x01, 0xfe, 
+0x00, 0x3f, 0xc0, 0x03, 0xfe, 0x00, 0x3f, 0xc0, 0x03, 0xfe, 0x00, 0x3f, 0xe0, 0x07, 0xfc, 0x00, 
+0x1f, 0xf0, 0x0f, 0xfc, 0x00, 0x1f, 0xfe, 0x7f, 0xf8, 0x00, 0x0f, 0xff, 0xff, 0xf8, 0x00, 0x07, 
+0xff, 0xff, 0xf0, 0x00, 0x03, 0xff, 0xff, 0xe0, 0x00, 0x01, 0xff, 0xff, 0xc0, 0x00, 0x00, 0xff, 
+0xff, 0x00, 0x00, 0x00, 0x1f, 0xfc, 0x00, 0x00  
+};
+
+const unsigned char myBitmap_4 [] PROGMEM = {
+// '4', 34x40px
+0x00, 0x00, 0x0f, 0x80, 0x00, 0x00, 0x00, 0x1f, 0xc0, 0x00, 0x00, 0x00, 0x3f, 0xe0, 0x00, 0x00, 
+0x00, 0x7f, 0xe0, 0x00, 0x00, 0x00, 0x7f, 0xe0, 0x00, 0x00, 0x00, 0xff, 0xe0, 0x00, 0x00, 0x01, 
+0xff, 0xe0, 0x00, 0x00, 0x03, 0xff, 0xe0, 0x00, 0x00, 0x07, 0xff, 0xe0, 0x00, 0x00, 0x07, 0xff, 
+0xe0, 0x00, 0x00, 0x0f, 0xff, 0xe0, 0x00, 0x00, 0x1f, 0xdf, 0xe0, 0x00, 0x00, 0x3f, 0xdf, 0xe0, 
+0x00, 0x00, 0x3f, 0x9f, 0xe0, 0x00, 0x00, 0x7f, 0x1f, 0xe0, 0x00, 0x00, 0xfe, 0x1f, 0xe0, 0x00, 
+0x01, 0xfe, 0x1f, 0xe0, 0x00, 0x03, 0xfc, 0x1f, 0xe0, 0x00, 0x03, 0xf8, 0x1f, 0xe0, 0x00, 0x07, 
+0xf0, 0x1f, 0xe0, 0x00, 0x0f, 0xf0, 0x1f, 0xe0, 0x00, 0x1f, 0xe0, 0x1f, 0xe0, 0x00, 0x1f, 0xc0, 
+0x1f, 0xe0, 0x00, 0x3f, 0x80, 0x1f, 0xe0, 0x00, 0x7f, 0x80, 0x1f, 0xe0, 0x00, 0x7f, 0xff, 0xff, 
+0xff, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0xff, 0xff, 0xff, 0xff, 0x80, 0x7f, 0xff, 0xff, 0xff, 
+0x80, 0x7f, 0xff, 0xff, 0xff, 0x00, 0x3f, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x1f, 0xe0, 0x00, 
+0x00, 0x00, 0x1f, 0xe0, 0x00, 0x00, 0x00, 0x1f, 0xe0, 0x00, 0x00, 0x00, 0x1f, 0xe0, 0x00, 0x00, 
+0x00, 0x1f, 0xe0, 0x00, 0x00, 0x00, 0x1f, 0xe0, 0x00, 0x00, 0x00, 0x1f, 0xe0, 0x00, 0x00, 0x00, 
+0x0f, 0xc0, 0x00, 0x00, 0x00, 0x07, 0xc0, 0x00  
+};
+
+const unsigned char myBitmap_5 [] PROGMEM = {
+// '5', 34x40px
+0x00, 0xff, 0xff, 0xf8, 0x00, 0x01, 0xff, 0xff, 0xf8, 0x00, 0x03, 0xff, 0xff, 0xfc, 0x00, 0x03, 
+0xff, 0xff, 0xfc, 0x00, 0x03, 0xff, 0xff, 0xfc, 0x00, 0x03, 0xff, 0xff, 0xf8, 0x00, 0x07, 0xff, 
+0xff, 0xf8, 0x00, 0x07, 0xf8, 0x00, 0x00, 0x00, 0x07, 0xf8, 0x00, 0x00, 0x00, 0x07, 0xf0, 0x00, 
+0x00, 0x00, 0x07, 0xf0, 0x00, 0x00, 0x00, 0x0f, 0xf0, 0x00, 0x00, 0x00, 0x0f, 0xf0, 0x00, 0x00, 
+0x00, 0x0f, 0xf3, 0xfe, 0x00, 0x00, 0x0f, 0xef, 0xff, 0x80, 0x00, 0x0f, 0xff, 0xff, 0xc0, 0x00, 
+0x0f, 0xff, 0xff, 0xe0, 0x00, 0x1f, 0xff, 0xff, 0xf0, 0x00, 0x1f, 0xff, 0xff, 0xf8, 0x00, 0x1f, 
+0xfc, 0x3f, 0xf8, 0x00, 0x1f, 0xf0, 0x0f, 0xfc, 0x00, 0x1f, 0xe0, 0x07, 0xfc, 0x00, 0x0f, 0x80, 
+0x03, 0xfe, 0x00, 0x00, 0x00, 0x03, 0xfe, 0x00, 0x00, 0x00, 0x03, 0xfe, 0x00, 0x00, 0x00, 0x01, 
+0xfe, 0x00, 0x00, 0x00, 0x01, 0xfe, 0x00, 0x0e, 0x00, 0x01, 0xfe, 0x00, 0x1f, 0x80, 0x01, 0xfe, 
+0x00, 0x3f, 0x80, 0x03, 0xfe, 0x00, 0x3f, 0xc0, 0x03, 0xfc, 0x00, 0x3f, 0xc0, 0x03, 0xfc, 0x00, 
+0x3f, 0xe0, 0x07, 0xfc, 0x00, 0x1f, 0xf0, 0x0f, 0xf8, 0x00, 0x1f, 0xfe, 0x7f, 0xf0, 0x00, 0x0f, 
+0xff, 0xff, 0xf0, 0x00, 0x07, 0xff, 0xff, 0xe0, 0x00, 0x03, 0xff, 0xff, 0x80, 0x00, 0x00, 0xff, 
+0xff, 0x00, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00
+};
+
+const unsigned char myBitmap_6 [] PROGMEM = {
+// '6', 34x40px
+0x00, 0x0f, 0xfe, 0x00, 0x00, 0x00, 0x3f, 0xff, 0x80, 0x00, 0x00, 0x7f, 0xff, 0xc0, 0x00, 0x00, 
+0xff, 0xff, 0xe0, 0x00, 0x01, 0xff, 0xff, 0xf0, 0x00, 0x03, 0xff, 0x9f, 0xf8, 0x00, 0x07, 0xfc, 
+0x07, 0xf8, 0x00, 0x07, 0xf8, 0x03, 0xfc, 0x00, 0x0f, 0xf0, 0x03, 0xfc, 0x00, 0x0f, 0xf0, 0x01, 
+0xf8, 0x00, 0x1f, 0xe0, 0x00, 0xf8, 0x00, 0x1f, 0xe0, 0x00, 0x60, 0x00, 0x1f, 0xe0, 0x00, 0x00, 
+0x00, 0x1f, 0xe0, 0x00, 0x00, 0x00, 0x3f, 0xe3, 0xff, 0x00, 0x00, 0x3f, 0xcf, 0xff, 0x80, 0x00, 
+0x3f, 0xdf, 0xff, 0xe0, 0x00, 0x3f, 0xff, 0xff, 0xf0, 0x00, 0x3f, 0xff, 0xff, 0xf8, 0x00, 0x3f, 
+0xff, 0x3f, 0xf8, 0x00, 0x3f, 0xfc, 0x07, 0xfc, 0x00, 0x3f, 0xf0, 0x03, 0xfc, 0x00, 0x3f, 0xf0, 
+0x03, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 
+0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xfe, 
+0x00, 0x1f, 0xf0, 0x01, 0xfe, 0x00, 0x1f, 0xf0, 0x03, 0xfe, 0x00, 0x0f, 0xf8, 0x03, 0xfe, 0x00, 
+0x0f, 0xfc, 0x07, 0xfc, 0x00, 0x07, 0xff, 0x3f, 0xfc, 0x00, 0x07, 0xff, 0xff, 0xf8, 0x00, 0x03, 
+0xff, 0xff, 0xf0, 0x00, 0x01, 0xff, 0xff, 0xe0, 0x00, 0x00, 0xff, 0xff, 0xc0, 0x00, 0x00, 0x3f, 
+0xff, 0x80, 0x00, 0x00, 0x0f, 0xfc, 0x00, 0x00  
+};
+
+const unsigned char myBitmap_7 [] PROGMEM = {
+// '7', 34x40px
+0x0f, 0xff, 0xff, 0xfc, 0x00, 0x1f, 0xff, 0xff, 0xfe, 0x00, 0x1f, 0xff, 0xff, 0xfe, 0x00, 0x1f, 
+0xff, 0xff, 0xfe, 0x00, 0x1f, 0xff, 0xff, 0xfe, 0x00, 0x1f, 0xff, 0xff, 0xfe, 0x00, 0x0f, 0xff, 
+0xff, 0xfc, 0x00, 0x00, 0x00, 0x07, 0xf8, 0x00, 0x00, 0x00, 0x07, 0xf8, 0x00, 0x00, 0x00, 0x0f, 
+0xf0, 0x00, 0x00, 0x00, 0x1f, 0xe0, 0x00, 0x00, 0x00, 0x1f, 0xc0, 0x00, 0x00, 0x00, 0x3f, 0xc0, 
+0x00, 0x00, 0x00, 0x7f, 0x80, 0x00, 0x00, 0x00, 0x7f, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 
+0x00, 0x01, 0xfe, 0x00, 0x00, 0x00, 0x01, 0xfe, 0x00, 0x00, 0x00, 0x03, 0xfc, 0x00, 0x00, 0x00, 
+0x03, 0xfc, 0x00, 0x00, 0x00, 0x07, 0xf8, 0x00, 0x00, 0x00, 0x07, 0xf8, 0x00, 0x00, 0x00, 0x0f, 
+0xf0, 0x00, 0x00, 0x00, 0x0f, 0xf0, 0x00, 0x00, 0x00, 0x0f, 0xf0, 0x00, 0x00, 0x00, 0x1f, 0xe0, 
+0x00, 0x00, 0x00, 0x1f, 0xe0, 0x00, 0x00, 0x00, 0x3f, 0xe0, 0x00, 0x00, 0x00, 0x3f, 0xe0, 0x00, 
+0x00, 0x00, 0x3f, 0xe0, 0x00, 0x00, 0x00, 0x3f, 0xc0, 0x00, 0x00, 0x00, 0x7f, 0xc0, 0x00, 0x00, 
+0x00, 0x7f, 0xc0, 0x00, 0x00, 0x00, 0x7f, 0xc0, 0x00, 0x00, 0x00, 0x7f, 0xc0, 0x00, 0x00, 0x00, 
+0x7f, 0xc0, 0x00, 0x00, 0x00, 0x7f, 0x80, 0x00, 0x00, 0x00, 0x7f, 0x80, 0x00, 0x00, 0x00, 0x7f, 
+0x00, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00  
+};
+
+const unsigned char myBitmap_8 [] PROGMEM = {
+// '8', 34x40px
+0x00, 0x1f, 0xfe, 0x00, 0x00, 0x00, 0x7f, 0xff, 0x80, 0x00, 0x01, 0xff, 0xff, 0xc0, 0x00, 0x03, 
+0xff, 0xff, 0xe0, 0x00, 0x07, 0xff, 0xff, 0xf0, 0x00, 0x07, 0xff, 0x3f, 0xf8, 0x00, 0x0f, 0xf8, 
+0x0f, 0xf8, 0x00, 0x0f, 0xf0, 0x07, 0xfc, 0x00, 0x0f, 0xf0, 0x03, 0xfc, 0x00, 0x0f, 0xf0, 0x03, 
+0xfc, 0x00, 0x0f, 0xe0, 0x03, 0xfc, 0x00, 0x0f, 0xf0, 0x03, 0xfc, 0x00, 0x0f, 0xf0, 0x03, 0xfc, 
+0x00, 0x0f, 0xf0, 0x07, 0xf8, 0x00, 0x07, 0xf8, 0x0f, 0xf8, 0x00, 0x07, 0xff, 0x3f, 0xf0, 0x00, 
+0x03, 0xff, 0xff, 0xe0, 0x00, 0x01, 0xff, 0xff, 0xc0, 0x00, 0x00, 0xff, 0xff, 0xc0, 0x00, 0x01, 
+0xff, 0xff, 0xe0, 0x00, 0x07, 0xff, 0xff, 0xf0, 0x00, 0x0f, 0xfe, 0x3f, 0xf8, 0x00, 0x0f, 0xf8, 
+0x07, 0xfc, 0x00, 0x1f, 0xf0, 0x03, 0xfe, 0x00, 0x1f, 0xe0, 0x03, 0xfe, 0x00, 0x1f, 0xe0, 0x01, 
+0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x3f, 0xe0, 0x01, 0xfe, 
+0x00, 0x3f, 0xe0, 0x01, 0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xfe, 0x00, 0x1f, 0xe0, 0x03, 0xfe, 0x00, 
+0x1f, 0xf0, 0x03, 0xfe, 0x00, 0x1f, 0xf8, 0x07, 0xfc, 0x00, 0x0f, 0xff, 0x3f, 0xfc, 0x00, 0x07, 
+0xff, 0xff, 0xf8, 0x00, 0x03, 0xff, 0xff, 0xf0, 0x00, 0x01, 0xff, 0xff, 0xe0, 0x00, 0x00, 0xff, 
+0xff, 0x80, 0x00, 0x00, 0x1f, 0xfe, 0x00, 0x00  
+};
+
+const unsigned char myBitmap_9 [] PROGMEM = {
+// '9', 34x40px
+0x00, 0x0f, 0xfe, 0x00, 0x00, 0x00, 0x3f, 0xff, 0x80, 0x00, 0x00, 0xff, 0xff, 0xc0, 0x00, 0x01, 
+0xff, 0xff, 0xe0, 0x00, 0x03, 0xff, 0xff, 0xf0, 0x00, 0x07, 0xff, 0xff, 0xf8, 0x00, 0x07, 0xff, 
+0x3f, 0xfc, 0x00, 0x0f, 0xfc, 0x0f, 0xfc, 0x00, 0x0f, 0xf0, 0x07, 0xfe, 0x00, 0x1f, 0xf0, 0x03, 
+0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xfe, 0x00, 0x1f, 0xe0, 0x01, 0xff, 
+0x00, 0x1f, 0xe0, 0x01, 0xff, 0x00, 0x1f, 0xe0, 0x01, 0xff, 0x00, 0x1f, 0xe0, 0x01, 0xff, 0x00, 
+0x1f, 0xe0, 0x01, 0xff, 0x00, 0x0f, 0xf0, 0x03, 0xff, 0x00, 0x0f, 0xf0, 0x03, 0xff, 0x00, 0x0f, 
+0xf8, 0x07, 0xff, 0x00, 0x07, 0xff, 0x3f, 0xff, 0x00, 0x03, 0xff, 0xff, 0xff, 0x00, 0x03, 0xff, 
+0xff, 0xff, 0x00, 0x01, 0xff, 0xfe, 0xff, 0x00, 0x00, 0x7f, 0xfc, 0xff, 0x00, 0x00, 0x1f, 0xf0, 
+0xff, 0x00, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00, 0x00, 0x01, 0xfe, 0x00, 0x01, 0x80, 0x01, 0xfe, 
+0x00, 0x07, 0xe0, 0x01, 0xfe, 0x00, 0x07, 0xe0, 0x03, 0xfe, 0x00, 0x0f, 0xf0, 0x03, 0xfc, 0x00, 
+0x07, 0xf0, 0x07, 0xfc, 0x00, 0x07, 0xf8, 0x0f, 0xf8, 0x00, 0x07, 0xff, 0x3f, 0xf0, 0x00, 0x03, 
+0xff, 0xff, 0xf0, 0x00, 0x01, 0xff, 0xff, 0xe0, 0x00, 0x00, 0xff, 0xff, 0xc0, 0x00, 0x00, 0x7f, 
+0xff, 0x00, 0x00, 0x00, 0x1f, 0xfc, 0x00, 0x00  
+};
+
+const unsigned char myBitmap_litre [] PROGMEM = {
+// 'litre', 10x12px
+0x10, 0x00, 0x15, 0x00, 0x11, 0x80, 0x15, 0x00, 0x15, 0x00, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x00, 
+0x5d, 0xc0, 0xd5, 0x40, 0x55, 0x40, 0x5d, 0xc0
+};
+
+
+
+float calcul_conso (unsigned long conso_i,unsigned long  tachy_i) {
+  float result = 9999;
+  if (tachy_i !=0) 
+{
+
+    result = 10.0 * convertion_consommation * convertion_vitesse * conso_i / tachy_i;
+    
+    if (result>= 999) {
+      result =9999;
+    } 
+  } 
+  return result;
+}
+
+void calcul_niveau_fuel() {
+      index_fuel++;
+      if ((index_fuel) == nb_val_fuel) {
+        index_fuel = 0;
+      }
+      Calcul_fuel[index_fuel] = analogRead(int_fuel);
+     
+      niveau_fuel = 0;
+      for (int k = 0; k <= nb_val_fuel-1; k++) {
+        niveau_fuel = niveau_fuel + Calcul_fuel[k];
+      }
+      niveau_fuel = (int) (niveau_fuel / nb_val_fuel);
+}
+
+float calcul_dist_restante(float conso_moy, int niv_fuel, unsigned long tachy_i) {
+    float result = 9999;
+    if ((conso_moy <= 200) && (tachy_i)>=1800){
+        result = 1000* (convertion_niveau_jauge_a * niv_fuel + convertion_niveau_jauge_b) / conso_moy; 
+    }
+    return result;
+}
+
+
+void inter_conso () {
+   cpt_conso1++;
+}
+
+void inter_moteur () {
+   cpt_moteur1++;
+}
+
+void inter_tachy () {
+   cpt_tachy1++;
+}
+
+void calc_rapport() {
+  rapport_engage = 0;
+  int Rapp = 0;
+  if (moteur_inst != 0) {
+    Rapp = (int) (100*tachy_inst/moteur_inst);
+  }
+  if ((Rapp>= 20) && (Rapp<= 28)) {
+    rapport_engage = 1;
+  } else {
+      if ((Rapp >= 43) && (Rapp <= 52)) {
+         rapport_engage = 2;
+      } else {
+         if ((Rapp >= 70) && (Rapp<= 78)) {
+            rapport_engage = 3;
+         } else {
+           if ((Rapp >= 95) && (Rapp<= 105)) {
+             rapport_engage = 4;
+           } else {
+              if ((Rapp >= 125) && (Rapp <= 135)) {
+                rapport_engage = 5;
+              }
+           }
+         }
+      }     
+  }     
+}
+
+void inter_12V () {
+       if (digitalRead(int_12V)==LOW) {
+          Ecrit_SD();
+       }
+       digitalWrite(TFT_BL, digitalRead(int_12V));
+}
+
+void check_menu_up (){
+    if (!(press_menu_up) && (digitalRead(int_Menu_UP)== LOW)) {
+        press_menu_up = true;
+        chgt_time_Menu_Up = millis();
+        inter_Menu_UP();
+    }
+     if ((press_menu_up) && (digitalRead(int_Menu_UP)== HIGH)) {
+        if ((millis()-chgt_time_Menu_Up) >= chgt_page_time_delay){
+          press_menu_up = false;
+        }
+    }
+}
+
+void check_menu_down (){
+    if (!(press_menu_down) && (digitalRead(int_Menu_Down)== LOW)) {
+        press_menu_down = true;
+        chgt_time_Menu_Down = millis();
+        inter_Menu_Down();
+    }
+     if ((press_menu_down) && (digitalRead(int_Menu_Down)== HIGH)) {
+        if ((millis()-chgt_time_Menu_Down) >= chgt_page_time_delay){
+          press_menu_down = false;
+        }
+    }
+}
+
+void check_menu_reset (){
+    if (!(press_menu_reset) && (digitalRead(int_Menu_Reset)== LOW)) {
+        press_menu_reset = true;
+        chgt_time_Menu_Reset = millis();
+        
+    }
+     if ((press_menu_reset) && (digitalRead(int_Menu_Reset)== HIGH)) {
+        if ((millis()-chgt_time_Menu_Reset) >= reset_time_delay){
+          inter_Menu_Reset();        
+        }
+        press_menu_reset = false;
+    }
+}
+
+void inter_Menu_UP () {
+    page ++;
+    if (page>page_max) {
+      page = 1; 
+    }
+    affichage_page_tft();
+}  
+
+void inter_Menu_Down () {
+    page --;
+    if (page < 1) {
+      page = page_max; 
+    }
+    affichage_page_tft();
+}
+
+void inter_Menu_Reset () {
+      switch (page) {
+      case 1:   
+          cpt_conso1 = 0;
+          cpt_tachy1 = 0;
+          cpt_conso = 0;
+          cpt_tachy = 0;
+      
+        break;
+      case 2:   
+          cpt_conso2 = 0;
+          cpt_tachy2 = 0;
+      
+        break;  
+      case 3:   
+          cpt_conso3 = 0;
+          cpt_tachy3 = 0;
+      
+        break;  
+      }     
+}
+
+  
+void Lit_SD() {   
+   config_file = SD.open("DATA.TXT");
+   String nouveauChiffre = "";
+   byte j = 0;
+   long nouveauChiffreNum = 0;   
+   while (config_file.available()){
+      char fileChar = (char)config_file.read();
+      if (fileChar == '\n') {
+          j++;  
+          switch (j) {
+            case 1:
+              cpt_conso1 = nouveauChiffre.toInt();
+            break;
+            case 2:
+              cpt_tachy1 = nouveauChiffre.toInt();
+            break;
+            case 3:
+              cpt_conso2 = nouveauChiffre.toInt();
+            break;
+            case 4:
+              cpt_tachy2 = nouveauChiffre.toInt();
+            break;
+            case 5:
+              niveau_fuel_prec = nouveauChiffre.toInt();
+            break;
+            case 6:
+              cpt_conso3 = nouveauChiffre.toInt();
+            break;
+            case 7:
+              cpt_tachy3 = nouveauChiffre.toInt();
+            break;
+            case 8:
+              page = nouveauChiffre.toInt();
+            break;            
+            default:
+               // if nothing else matches, do the default
+               // default is optional
+            break;
+          } 
+          nouveauChiffre = "";
+       } else {
+           if (fileChar >= ' ') {nouveauChiffre += fileChar;}        // >= ' ' pour supprimer tout ce qui est < que espace.
+       }   
+    }
+    config_file.close();
+
+    page = 1;
+    niveau_fuel = analogRead(int_fuel);
+    delay(50);
+    niveau_fuel = niveau_fuel + analogRead(int_fuel);
+    delay(50);
+    niveau_fuel = niveau_fuel + analogRead(int_fuel);
+    delay(50);
+    niveau_fuel = niveau_fuel + analogRead(int_fuel);
+    niveau_fuel = (int) (niveau_fuel/4);
+    
+    if ((niveau_fuel - niveau_fuel_prec) >Delta_Fuel) {
+      cpt_conso1 = 0;
+      cpt_tachy1 = 0;
+ //     Serial.println("Refuel remise à zero des compteurs");
+    } else {
+      niveau_fuel =  niveau_fuel_prec;
+    }
+    for (int k = 0; k <= nb_val_fuel-1; k++) {
+    Calcul_fuel[k]=niveau_fuel;
+    }
+   cpt_conso = cpt_conso1;
+    cpt_tachy = cpt_tachy1; 
+}
+
+void Ecrit_SD() {
+    record_file.close();
+    Serial.println("Arrêt ODB!");
+    SD.remove("DATA.TXT");
+    config_file = SD.open("DATA.TXT", FILE_WRITE);
+    if (config_file) {
+      Serial.print("Writing to DATA.TXT...");
+      
+      config_file.println(cpt_conso1);
+      config_file.println(cpt_tachy1);
+      config_file.println(cpt_conso2);
+      config_file.println(cpt_tachy2);
+      config_file.println(niveau_fuel);
+      config_file.println(cpt_conso3);
+      config_file.println(cpt_tachy3);
+      config_file.println(page);
+      
+      // close the file:
+      config_file.close();
+      Serial.println("done.");
+    } else {
+      // if the file didn't open, print an error:
+      Serial.println("error opening DATA.TXT");
+    }
+    Serial.println("Sauvergarde SD terminée...");
+}
+
+void Ecrit_record() {
+      record_file.print(tps_affiche);
+      record_file.print(";");
+      record_file.print(tachy_inst);
+      record_file.print(";");
+      record_file.print(moteur_inst);
+      record_file.print(";");
+      record_file.print(conso_inst);
+      record_file.print(";");
+      record_file.print(niveau_fuel);
+      record_file.print(";");
+      record_file.print(cpt_tachy1);
+      record_file.print(";");
+      record_file.print(cpt_moteur1);
+      record_file.print(";");
+      record_file.println(cpt_conso1);
+
+      record_file.flush();
+}
+
+// This function opens a Windows Bitmap (BMP) file and
+// displays it at the given coordinates.  It's sped up
+// by reading many pixels worth of data at a time
+// (rather than pixel by pixel).  Increasing the buffer
+// size takes more of the Arduino's precious RAM but
+// makes loading a little faster.  20 pixels seems a
+// good balance.
+ 
+#define BUFFPIXEL 20
+ 
+void bmpDraw(char *filename, uint8_t x, uint16_t y) {
+ 
+  File     bmpFile;
+  int      bmpWidth, bmpHeight;   // W+H in pixels
+  uint8_t  bmpDepth;              // Bit depth (currently must be 24)
+  uint32_t bmpImageoffset;        // Start of image data in file
+  uint32_t rowSize;               // Not always = bmpWidth; may have padding
+  uint8_t  sdbuffer[3*BUFFPIXEL]; // pixel buffer (R+G+B per pixel)
+  uint8_t  buffidx = sizeof(sdbuffer); // Current position in sdbuffer
+  boolean  goodBmp = false;       // Set to true on valid header parse
+  boolean  flip    = true;        // BMP is stored bottom-to-top
+  int      w, h, row, col;
+  uint8_t  r, g, b;
+  uint32_t pos = 0, startTime = millis();
+ 
+  if((x >= tft.width()) || (y >= tft.height())) return;
+ 
+  Serial.println();
+  Serial.print(F("Loading image '"));
+  Serial.print(filename);
+  Serial.println('\'');
+ 
+  // Open requested file on SD card
+  if ((bmpFile = SD.open(filename)) == NULL) {
+    Serial.print(F("File not found"));
+    return;
+  }
+ 
+  // Parse BMP header
+  if(read16(bmpFile) == 0x4D42) { // BMP signature
+    Serial.print(F("File size: ")); Serial.println(read32(bmpFile));
+    (void)read32(bmpFile); // Read & ignore creator bytes
+    bmpImageoffset = read32(bmpFile); // Start of image data
+    Serial.print(F("Image Offset: ")); Serial.println(bmpImageoffset, DEC);
+    // Read DIB header
+    Serial.print(F("Header size: ")); Serial.println(read32(bmpFile));
+    bmpWidth  = read32(bmpFile);
+    bmpHeight = read32(bmpFile);
+    if(read16(bmpFile) == 1) { // # planes -- must be '1'
+      bmpDepth = read16(bmpFile); // bits per pixel
+      Serial.print(F("Bit Depth: ")); Serial.println(bmpDepth);
+      if((bmpDepth == 24) && (read32(bmpFile) == 0)) { // 0 = uncompressed
+ 
+        goodBmp = true; // Supported BMP format -- proceed!
+        Serial.print(F("Image size: "));
+        Serial.print(bmpWidth);
+        Serial.print('x');
+        Serial.println(bmpHeight);
+ 
+        // BMP rows are padded (if needed) to 4-byte boundary
+        rowSize = (bmpWidth * 3 + 3) & ~3;
+ 
+        // If bmpHeight is negative, image is in top-down order.
+        // This is not canon but has been observed in the wild.
+        if(bmpHeight < 0) {
+          bmpHeight = -bmpHeight;
+          flip      = false;
+        }
+ 
+        // Crop area to be loaded
+        w = bmpWidth;
+        h = bmpHeight;
+        if((x+w-1) >= tft.width())  w = tft.width()  - x;
+        if((y+h-1) >= tft.height()) h = tft.height() - y;
+ 
+        // Set TFT address window to clipped image bounds
+        tft.startWrite();
+        tft.setAddrWindow(x, y, w, h);
+ 
+      for (row=0; row<h; row++) { // For each scanline...
+ 
+          // Seek to start of scan line.  It might seem labor-
+          // intensive to be doing this on every line, but this
+          // method covers a lot of gritty details like cropping
+          // and scanline padding.  Also, the seek only takes
+          // place if the file position actually needs to change
+          // (avoids a lot of cluster math in SD library).
+          if(flip) // Bitmap is stored bottom-to-top order (normal BMP)
+            pos = bmpImageoffset + (bmpHeight - 1 - row) * rowSize;
+          else     // Bitmap is stored top-to-bottom
+            pos = bmpImageoffset + row * rowSize;
+          if(bmpFile.position() != pos) { // Need seek?
+            tft.endWrite();
+            bmpFile.seek(pos);
+            buffidx = sizeof(sdbuffer); // Force buffer reload
+          }
+ 
+          for (col=0; col<w; col++) { // For each pixel...
+            // Time to read more pixel data?
+            if (buffidx >= sizeof(sdbuffer)) { // Indeed
+              bmpFile.read(sdbuffer, sizeof(sdbuffer));
+              buffidx = 0; // Set index to beginning
+              tft.startWrite();
+            }
+ 
+            // Convert pixel from BMP to TFT format, push to display
+            b = sdbuffer[buffidx++];
+            g = sdbuffer[buffidx++];
+            r = sdbuffer[buffidx++];
+            tft.pushColor(tft.color565(r,g,b));
+          } // end pixel
+        } // end scanline
+        tft.endWrite();
+        Serial.print(F("Loaded in "));
+        Serial.print(millis() - startTime);
+        Serial.println(" ms");
+      } // end goodBmp
+    }
+  }
+ 
+  bmpFile.close();
+  if(!goodBmp) Serial.println(F("BMP format not recognized."));
+}
+ 
+ 
+// These read 16- and 32-bit types from the SD card file.
+// BMP data is stored little-endian, Arduino is little-endian too.
+// May need to reverse subscript order if porting elsewhere.
+ 
+uint16_t read16(File f) {
+  uint16_t result;
+  ((uint8_t *)&result)[0] = f.read(); // LSB
+  ((uint8_t *)&result)[1] = f.read(); // MSB
+  return result;
+}
+ 
+uint32_t read32(File f) {
+  uint32_t result;
+  ((uint8_t *)&result)[0] = f.read(); // LSB
+  ((uint8_t *)&result)[1] = f.read();
+  ((uint8_t *)&result)[2] = f.read();
+  ((uint8_t *)&result)[3] = f.read(); // MSB
+  return result;
+}
+ 
+void affichage_vitesse(uint8_t vit) {
+  
+ uint8_t a=0, b=55,u,d,c,j;
+ bool clean = true;
+// Serial.print(" vit= ");
+// Serial.print(vit);
+
+  u = vit - ((int)(vit/10))*10;
+  d = (int) ((vit-u - ((int)(vit/100))*100)/10);
+  c = (int)(vit/100);
+  
+
+ for (uint8_t i=0; i <= 2; i++){
+  switch (2-i) {
+    case 0:   
+      a = 15;
+      if (c==0) {
+        j = 10;
+      } else {
+        j = c;
+      }
+      clean = c_prev != j;
+      c_prev = j;
+    break;
+    case 1:   
+      a = 50;
+      if ((c+d)==0) {
+        j = 10;
+      } else {
+        j = d;
+      }
+      clean = d_prev != j;
+      d_prev = j;
+    break;
+    case 2:   
+      a = 85;
+      if ((c+d+u)==0) {
+        j = 10;
+      } else {
+        j = u;
+      }
+      clean = u_prev != j;
+      u_prev = j;
+    break;
+  }
+  if (clean) {
+   tft.fillRect(a,b, 34, 40, ST77XX_BLACK);
+  }
+  switch (j) {
+    case 0:   
+      
+      tft.drawBitmap(a,b,myBitmap_0,34,40,ST77XX_WHITE);
+      break;
+    case 1:    
+      tft.drawBitmap(a,b,myBitmap_1,34,40,ST77XX_WHITE);
+      break;
+    case 2:    
+      tft.drawBitmap(a,b,myBitmap_2,34,40,ST77XX_WHITE);
+      break;
+    case 3:    
+      tft.drawBitmap(a,b,myBitmap_3,34,40,ST77XX_WHITE);
+      break;
+    case 4:    
+      tft.drawBitmap(a,b,myBitmap_4,34,40,ST77XX_WHITE);
+      break;
+    case 5:    
+      tft.drawBitmap(a,b,myBitmap_5,34,40,ST77XX_WHITE);
+      break;
+    case 6:    
+      tft.drawBitmap(a,b,myBitmap_6,34,40,ST77XX_WHITE);
+      break;
+    case 7:    
+      tft.drawBitmap(a,b,myBitmap_7,34,40,ST77XX_WHITE);
+      break;
+    case 8:    
+      tft.drawBitmap(a,b,myBitmap_8,34,40,ST77XX_WHITE);
+      break;
+    case 9:    
+      tft.drawBitmap(a,b,myBitmap_9,34,40,ST77XX_WHITE);
+      break;
+    case 10:    
+        // nothing
+      break;
+    }
+ }
+  Serial.println("");
+  tft.setTextSize(1); 
+  tft.setCursor(130,57);
+  tft.print("km/h");
+}
+
+void affichage_page_tft () {
+  tft.fillScreen(ST77XX_BLACK);
+  switch (page) {
+    case 1:   
+      tft.setTextColor(ST77XX_WHITE);
+      tft.drawBitmap(3,23,myBitmap_pompe1,17,11,ST77XX_WHITE);     
+      tft.drawFastHLine(0, 45, 160, ST77XX_RED);
+      tft.drawFastVLine(80, 0, 45, ST77XX_RED);
+      tft.drawBitmap(84,23,myBitmap_pompe2,18,11,ST77XX_WHITE);
+      tft.drawFastHLine(0, 102, 160, ST77XX_RED);
+      tft.drawBitmap(84,110,myBitmap_moy,12,12,ST77XX_WHITE);
+      tft.drawFastVLine(80, 102, 140, ST77XX_RED);
+      tft.drawBitmap(146,110,myBitmap_litre,10,12,ST77XX_WHITE);
+      tft.drawBitmap( 66,110,myBitmap_litre,10,12,ST77XX_WHITE);
+      tft.setTextSize(1); 
+      tft.setCursor(66,25);
+      tft.print("km");
+      tft.setCursor(146,25);
+      tft.print("km");
+    break;
+    case 2:   
+      // affichage page trajet 1
+      tft.setTextSize(2);
+      tft.setTextColor(ST77XX_RED);
+      tft.fillScreen(ST77XX_BLACK);
+      tft.setCursor(2,20); 
+      tft.print("Trajet 1 ");
+      tft.setTextSize(3);
+      tft.setCursor(15,37); 
+      tft.print("dist :");
+      tft.setCursor(15,67); 
+      tft.print("moy :");
+      tft.setCursor(15,97); 
+      tft.print("inst :");
+      tft.setTextSize(2);
+      tft.setTextColor(ST77XX_WHITE);
+      tft.setCursor(110,40);
+      tft.print("km");
+      tft.setCursor(110,70);
+      tft.print("l/100");
+      tft.setCursor(110,100);
+      tft.print("l/100");
+    break;
+    case 3:   
+      // affichage page record
+      tft.setTextSize(2);
+      tft.setTextColor(ST77XX_RED);
+      tft.fillScreen(ST77XX_BLACK);
+      tft.setCursor(2,20); 
+      tft.print("Fuel ");
+      tft.setCursor(2,37); 
+      tft.print("Vit");
+      tft.setCursor(2,54); 
+      tft.print("cons");
+      tft.setCursor(2,71); 
+      tft.print("Vit");
+      tft.setCursor(2,88); 
+      tft.print("rpm");
+      tft.setCursor(2,105);       
+      tft.print("cons");
+    break;
+  }
+}
+ 
+void affichage_tft() {
+  float conso = 0;
+
+  unsigned int dist_parcouru = 0;
+  switch (page) {
+    case 1:       
+      tft.setTextColor(ST77XX_WHITE);
+      affichage_vitesse((int) (tachy_inst/convertion_vitesse/freq_affichage*1000));
+
+//    distance parcourue  
+      dist_parcouru = (int)(cpt_tachy1/3600/convertion_vitesse);
+      if (Aff1_distance_parcourue != dist_parcouru) {
+             Aff1_distance_parcourue = dist_parcouru;
+             tft.fillRect(109,23, 36, 16, ST77XX_BLACK);
+             tft.setTextSize(2); 
+             tft.setCursor(109,23);
+             if (Aff1_distance_parcourue <10) {
+                          tft.setCursor(109 + 2*larg_cara,23);
+             } else {
+                  if (Aff1_distance_parcourue <100) {
+                          tft.setCursor(109 + larg_cara,23);
+                  } 
+             }            
+             tft.print((int)(Aff1_distance_parcourue));
+      }
+
+//    Consommation moyenne      
+//      conso = calcul_conso(cpt_conso1,cpt_tachy1);
+      conso = 10.0 * convertion_consommation * convertion_vitesse * cpt_conso1 / cpt_tachy1;
+      if (Aff1_conso_moy != conso) {
+          Aff1_conso_moy = conso;
+          tft.fillRect(98,110, 47, 16, ST77XX_BLACK);  
+          tft.setTextSize(2); 
+          tft.setCursor(98 ,110);
+           if (conso <100) {
+                          tft.setCursor(98 + larg_cara,110);
+             } else {
+                  if (conso >=1000) {
+                          conso = 9999;
+                  }
+             }
+          if (conso != 9999) {
+             tft.print(conso/10,1);
+          } else {  
+             tft.print("-.-");
+          }    
+      }
+
+//    distance restante   
+      distance_rest = calcul_dist_restante(conso,niveau_fuel,cpt_tachy1);
+      if (Aff1_distance_rest != distance_rest) {
+           tft.fillRect(26,23, 39, 16, ST77XX_BLACK);
+           Aff1_distance_rest = distance_rest;
+           tft.setTextSize(2); 
+           tft.setCursor(26,23);
+           if (distance_rest <10) {
+                        tft.setCursor(26 + 2* larg_cara,23);
+           } else {
+               if (distance_rest <100) {
+                        tft.setCursor(26 + larg_cara,23);
+               } 
+           }
+  
+           if (distance_rest == 9999) {
+              tft.print(" -");
+           } else {
+              tft.print(distance_rest,0);
+           }
+      }
+      
+//   Consommation instantanée     
+     conso = calcul_conso(conso_inst,tachy_inst);
+//     conso = 10.0 * convertion_consommation * convertion_vitesse * conso_inst / tachy_inst;
+     if (Aff1_conso_inst != conso) {
+          Aff1_conso_inst = conso;
+          tft.fillRect(10,110, 59, 16, ST77XX_BLACK);
+          tft.setTextSize(2); 
+          tft.setCursor(13,110);
+          if (conso <100) {
+               tft.setCursor(13 +  larg_cara,110);
+          } else {
+               if (conso >=1000) {                    
+                        conso = 9999;
+               }
+          }
+          if (conso != 9999) {
+             tft.print(conso/10,1);
+          } else {  
+             tft.print(" -.-");
+          }              
+      } 
+      
+//    rapport engagé
+      if (Aff1_rapport != rapport_engage) {     
+           Aff1_rapport = rapport_engage;
+            tft.fillRect(145,85, 120, 15, ST77XX_BLACK); 
+           if (Aff1_rapport != 0) {             
+               tft.setCursor(145,85);
+               tft.setTextSize(2); 
+               tft.print(Aff1_rapport);    
+           }  
+      }
+    break;
+    case 2:   
+      tft.setTextColor(ST77XX_WHITE);
+       
+//    distance parcourue  
+      dist_parcouru = (int)(cpt_tachy2/3600/convertion_vitesse);
+      if (Aff1_distance_parcourue != dist_parcouru) {
+             Aff1_distance_parcourue = dist_parcouru;
+             tft.fillRect(50,37, 60, 32, ST77XX_BLUE);  
+             tft.setTextSize(3); 
+             tft.setCursor(50,37);
+             if (Aff1_distance_parcourue <10) {
+                          tft.setCursor(50 + 4*larg_cara,37);
+             } else {
+                  if (Aff1_distance_parcourue <100) {
+                          tft.setCursor(50 + 2*larg_cara,37);
+                  } 
+             }
+             tft.print((int)(Aff1_distance_parcourue));
+      }
+
+      //    Consommation moyenne      
+      conso = calcul_conso(cpt_conso2,cpt_tachy2);
+      if (Aff1_conso_moy != conso) {
+          Aff1_conso_moy = conso;
+          tft.fillRect(50,67, 60, 32, ST77XX_BLACK);
+          tft.setTextSize(3); 
+          tft.setCursor(50,67);
+          if (conso <1000) {
+                  tft.setCursor(50 + 2*larg_cara,67);
+          }
+          if (conso != 9999) {
+             tft.print(conso/10,1);
+          } else {  
+             tft.print(" -.-");
+          }    
+      }
+      
+       //   Consommation instantanée     
+  //   conso = calcul_conso(conso_inst,tachy_inst);
+     conso = 10.0 * convertion_consommation * convertion_vitesse * conso_inst / tachy_inst;
+     if (Aff1_conso_inst != conso) {
+          Aff1_conso_inst = conso;
+          tft.fillRect(50,97, 60, 32, ST77XX_BLACK);
+          tft.setTextSize(2); 
+          tft.setCursor(50,97);
+          if (conso <100) {
+                        tft.setCursor(50 +  2*larg_cara,97);
+          } 
+          if (conso != 9999) {
+             tft.print(conso/10,1);
+          } else {  
+             tft.print(" -.-");
+          }              
+      } 
+    break;
+    case 3:   
+       tft.fillRect(55,20, 105, 15, ST77XX_BLACK);
+       tft.setCursor(55,20); 
+ //     tft.print("Fuel ");
+       tft.print(niveau_fuel);
+       tft.fillRect(55,37, 105, 15, ST77XX_BLACK);
+       tft.setCursor(55,37); 
+//      tft.print("dist ");
+       tft.print(cpt_tachy1);
+       tft.fillRect(55,54, 105, 15, ST77XX_BLACK);
+       tft.setCursor(55,54); 
+//      tft.print("conso ");
+       conso = calcul_conso(cpt_conso1,cpt_tachy1);
+       tft.print(conso/10,1);
+ //      conso = convertion_consommation * convertion_vitesse * cpt_conso1 / cpt_tachy1;
+ //      tft.print(conso);
+       tft.fillRect(55,71, 105, 15, ST77XX_BLACK);
+       tft.setCursor(55,71); 
+ //     tft.print("tachy ");
+       tft.print((int) (tachy_inst/convertion_vitesse/freq_affichage*1000));
+       tft.setTextSize(1);
+       tft.print(" km/h ");
+       tft.setTextSize(2);
+       tft.fillRect(55,88, 105, 15, ST77XX_BLACK);
+       tft.setCursor(55,88); 
+ //     tft.print("rpm ");
+       tft.print((int) (moteur_inst*30000/freq_affichage));
+       tft.setTextSize(1);
+       tft.print(" t/mn ");
+       tft.setTextSize(2);
+       tft.fillRect(55,105, 105, 15, ST77XX_BLACK);
+       tft.setCursor(55,105);       
+ //     tft.print("conso ");
+       conso = calcul_conso(conso_inst,tachy_inst);
+ //      conso = 10.0 * convertion_consommation * convertion_vitesse * conso_inst / tachy_inst;
+     //  if (conso != 9999) {
+           tft.print(conso/10,1);
+     //  }
+//       tft.print(conso_inst);
+       tft.fillRect(140,105, 120, 15, ST77XX_BLACK);         
+       if (rapport_engage != 0) {
+           tft.setCursor(140,105); 
+           tft.print(rapport_engage);
+       }
+    break;
+  }
+     
+}
+
+
+void setup(void) {
+  Serial.begin(9600);
+ 
+  pinMode(TFT_CS, OUTPUT);
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, LOW);
+  pinMode(int_conso,INPUT); 
+  pinMode(int_moteur,INPUT);
+  pinMode(int_tachy,INPUT);
+  pinMode(int_12V,INPUT);
+  pinMode(int_Menu_UP,INPUT);
+  pinMode(int_Menu_Down,INPUT);
+  
+    
+  digitalWrite(TFT_CS, HIGH);
+
+  Serial.print("Initializing SD card...");
+  if (!SD.begin()) {
+    Serial.println("failed!");
+    while(1);  // stay here
+  }
+  Serial.println("OK!");
+
+  Lit_SD();
+  attachInterrupt (digitalPinToInterrupt(int_conso), inter_conso, FALLING);
+  attachInterrupt (digitalPinToInterrupt(int_moteur), inter_moteur, RISING); 
+  attachInterrupt (digitalPinToInterrupt(int_tachy), inter_tachy, RISING); 
+  attachInterrupt (digitalPinToInterrupt(int_12V), inter_12V, CHANGE); 
+
+//  attachInterrupt (digitalPinToInterrupt(int_Menu_UP), inter_Menu_UP, FALLING); 
+//  attachInterrupt (digitalPinToInterrupt(int_Menu_Down), inter_Menu_Down, FALLING); 
+//  attachInterrupt (digitalPinToInterrupt(int_Menu_Reset), inter_Menu_Reset, CHANGE); 
+
+  tft.initR(INITR_BLACKTAB);
+  tft.fillScreen(ST77XX_BLACK);
+
+
+
+  bmpDraw("Logo.BMP", 0, 0);        // dessine le logo  
+  digitalWrite(TFT_BL, HIGH);
+
+  delay(3000);
+
+  record_file = SD.open("RECORD.TXT", FILE_WRITE);
+  if (record_file) {
+      Serial.print("Writing to RECORD.TXT...");
+    } else {
+      // if the file didn't open, print an error:
+      Serial.println("error opening RECORD.TXT");
+    }
+  delay(2500);
+  
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setRotation(4);
+  tft.setRotation(2);
+
+  tft.setRotation(1);
+  tft.fillScreen(ST77XX_BLACK);
+  affichage_page_tft();
+
+  
+   tft.setTextColor(ST77XX_WHITE);
+}
+ 
+void loop() {
+
+   check_menu_up (); // verifie si action sur les btn du menu
+   check_menu_down ();
+   
+   tps_affiche = millis()-timer;
+   
+   if (tps_affiche>=freq_affichage) {
+    
+      timer = millis();
+      
+      tachy_inst = (int) (cpt_tachy1 - cpt_tachy);
+      cpt_tachy = cpt_tachy1;
+      
+      moteur_inst = (int) (cpt_moteur1 - cpt_moteur);
+      cpt_moteur = cpt_moteur1;
+      
+      conso_inst = (int) (cpt_conso1 - cpt_conso);
+      cpt_conso = cpt_conso1;
+
+      cpt_conso2 = cpt_conso2 + conso_inst;
+      cpt_conso3 = cpt_conso3 + conso_inst;
+      cpt_tachy2 = cpt_tachy2 + tachy_inst;
+      cpt_tachy3 = cpt_tachy3 + tachy_inst;
+      
+      calcul_niveau_fuel();
+    
+      calc_rapport();
+
+//      Ecrit_record();  // procedure d'apprentissage
+       
+      affichage_tft();
+   }
+  
+}
