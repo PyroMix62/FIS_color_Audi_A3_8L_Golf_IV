@@ -49,22 +49,22 @@ Idem à la borne 25 : on récupère des impulsions 12V proportionnelles à la vi
 
 Borne 11 : régime moteur : 
 On récupère un signal 12V  de forme carrée dont la fréquence est proportionnelle au régime moteur
-![alt text]https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/2.png
+![alt text](https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/2.png)
 
 Borne 5 : Transmetteur de niveau de carburant
 On récupère ici un signal numérique de type K-Line. Mais c’est en fait la partie analogique (amplitude du signal) qui transmet le niveau de carburant. Elle varie d’environ 1.5V (vide) à 3V (plein)
-![alt text]https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/3.png
+![alt text](https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/3.png)
 
 Traitement des données
 
 Le montage s’articule autour d’un arduino mkrzero qui possède plusieurs entrées / sorties numériques analogiques ainsi qu’un lecteur de carte µSD. Ce dernier va donc enregistrer les données des différents capteurs, les traités , les enregistrés sur une carte SD (lors de la coupure du contact) et gérer l’affichage sur un petit écran TFT couleur
 
-![alt text]https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/4.png
+![alt text](https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/4.png)
 
 https://www.arduino.cc/en/Main/ArduinoBoardMKRZero&
 
 Ce qu’il faut retenir est qu’un arduino fonctionne sous 5V et que ses entrées /sorties ne tolère que du 3,3V. Il va donc falloir créer un petit montage (appelé shield ) qui va permettre de connecter l’arduino à la voiture et de les rendre compatibles
-![alt text]https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/5.png
+![alt text](https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/5.png)
 
 Alimentation du montage
 
@@ -99,13 +99,13 @@ Implantation des composant
 
 J’utilise une platine de prototypage pour réaliser le support de l’arduino ce qui évite les typons et les bains acides
 
-![alt text]https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/6.png
+![alt text](https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/6.png)
 
 Cotés cuivres les pistes sont interrompues grâce à un petit coup de perceuses (cf ronds rouge sur la vue côté cuivre)
 
-![alt text]https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/7.png
-![alt text]https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/8.png
-![alt text]https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/9.png
+![alt text](https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/7.png)
+![alt text](https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/8.png)
+![alt text](https://github.com/AmesisProject/FIS_color_Audi_A3_8L_Golf_IV/blob/main/Photo/9.png)
 
 Combiné d'instruments - jusqu'au millésime 1998/1999
 
